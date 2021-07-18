@@ -1,0 +1,13 @@
+[package]
+name = "groupware-actix"
+version = "0.1.0"
+edition = "2018"
+authors = ["bitfriend <bitfriend@hotmail.com>"]
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+actix-web = "3"
+dotenv = "0.15.0"
+r2d2 = "0.8"
+r2d2_arangors = "0.1"
