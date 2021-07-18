@@ -10,8 +10,6 @@ use crate::config::{host, port, db_host, db_port, db_username, db_password};
 
 mod controllers;
 
-type DbPool = Pool<ArangoDBConnectionManager>;
-
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
     dotenv().ok();
@@ -20,7 +18,7 @@ async fn main() -> std::io::Result<()> {
 
     let pair1 = Arc::new((Mutex::new(false), Condvar::new()));
     let pair2 = Arc::clone(&pair1);
-    let pool: DbPool;
+    let pool;
 
     // initialize database connection
     let url = format!("http://{}:{}", db_host(), db_port());
