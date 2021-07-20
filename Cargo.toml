@@ -9,6 +9,12 @@ authors = ["bitfriend <bitfriend@hotmail.com>"]
 [dependencies]
 actix-web = "3"
 arangors = { version = "0.5", default-features = false }
+chrono = { version = "0.4.10", features = ["serde"] }
+diesel = { version = "1.4.2", features = ["uuidv07", "r2d2", "chrono"] }
 dotenv = "0.15.0"
 r2d2 = "0.8"
 r2d2_arangors = "0.2"
+serde = "1.0"
+serde_derive = "1.0"
+serde_json = "1.0"
+uclient = "0.1"

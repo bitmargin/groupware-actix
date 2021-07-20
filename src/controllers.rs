@@ -1,16 +1,32 @@
-use actix_web::{error, web, HttpResponse, Responder};
-use arangors::{ClientError, Connection, Database};
-use r2d2::{ManageConnection, Pool};
-use r2d2_arangors::pool::{ArangoDBConnectionManager};
-use std::result::Result;
+use actix_web::{get, web, Error, HttpResponse, Responder, Result};
+use arangors::{AqlQuery, Database};
+use std::vec::Vec;
+use uclient::reqwest::ReqwestClient;
 
 use crate::config::{db_database};
+use crate::{DbPool, DbConn};
+use crate::models::{Company};
 
-type DbPool = Pool<ArangoDBConnectionManager>;
+#[get("/companies")]
+pub async fn get_companies(pool: web::Data<DbPool>) -> Result<HttpResponse, Error> {
+    let res = web::block(move || get_companies_pure(pool))
+        .await
+        .map_err(|e| {
+            eprintln!("{}", e);
+            HttpResponse::InternalServerError().finish()
+        })?;
+    Ok(HttpResponse::Ok().json(res))
+}
 
-pub async fn get_companies(conn: web::Data<Connection>) -> impl Responder {
-    let db = conn.get_ref().db(&db_database());
-    format!("hello from get companies")
+fn get_companies_pure(pool: web::Data<DbPool>) -> Result<Vec<Company>, diesel::result::Error> {
+    let conn: DbConn = pool.get().unwrap();
+    let db: Database<ReqwestClient> = conn.db(&db_database()).unwrap();
+    let aql = AqlQuery::builder()
+        .query("FOR c IN @@collection LIMIT 10 RETURN c")
+        .bind_var("@collection", "companies")
+        .build();
+    let results: Vec<Company> = db.aql_query(aql).unwrap();
+    Ok(results)
 }
 
 pub async fn get_company_by_id(pool: web::Data<DbPool>) -> impl Responder {
