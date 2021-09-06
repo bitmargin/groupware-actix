@@ -5,20 +5,28 @@ use crate::company::{
     FindCompaniesParams,
     DeleteCompanyParams,
 };
-use crate::database::{DbPool};
+use crate::database::DbPool;
 
 #[get("/companies")]
 async fn find(
-    params: web::Query<FindCompaniesParams>,
+    info: web::Query<FindCompaniesParams>,
     pool: web::Data<DbPool>,
 ) -> Result<HttpResponse, Error> {
-    let result = web::block(move || Company::find(&params, &pool)).await?;
-    Ok(HttpResponse::Ok().json(result))
+    let params: FindCompaniesParams = info.into_inner();
+    match params.check_valid() {
+        Ok(_) => {
+            let result = web::block(move || Company::find(params, &pool)).await?;
+            Ok(HttpResponse::Ok().json(result))
+        },
+        Err(e) => {
+            Ok(HttpResponse::BadRequest().json(e.errors()))
+        },
+    }
 }
 
 #[get("/companies/{key}")]
 async fn show(
-    key: web::Path<String>,
+    web::Path(key): web::Path<String>,
     pool: web::Data<DbPool>,
 ) -> Result<HttpResponse, Error> {
     let result = web::block(move || Company::show(&key, &pool)).await?;
@@ -27,36 +35,36 @@ async fn show(
 
 #[post("/companies")]
 async fn create(
-    params: web::Form<Company>,
+    info: web::Json<Company>,
     pool: web::Data<DbPool>,
 ) -> Result<HttpResponse, Error> {
-    let result = web::block(move || Company::create(params, &pool)).await?;
+    let result = web::block(move || Company::create(&info, &pool)).await?;
     Ok(HttpResponse::Ok().json(result))
 }
 
 #[put("/companies/{key}")]
 async fn update(
-    key: web::Path<String>,
-    params: web::Form<Company>,
+    web::Path(key): web::Path<String>,
+    info: web::Json<Company>,
     pool: web::Data<DbPool>,
 ) -> Result<HttpResponse, Error> {
-    let result = web::block(move || Company::update(&key, params, &pool)).await?;
+    let result = web::block(move || Company::update(&key, &info, &pool)).await?;
     Ok(HttpResponse::Ok().json(result))
 }
 
 #[delete("/companies/{key}")]
 async fn delete(
-    key: web::Path<String>,
-    params: web::Form<DeleteCompanyParams>,
+    web::Path(key): web::Path<String>,
+    form: web::Form<DeleteCompanyParams>,
     pool: web::Data<DbPool>,
 ) -> Result<HttpResponse, Error> {
-    let mode = params.mode.clone();
+    let mode = form.mode.clone();
     let result = web::block(move || {
-        if params.mode == "erase" {
+        if form.mode == "erase" {
             return Company::erase(&key, &pool);
-        } else if params.mode == "trash" {
+        } else if form.mode == "trash" {
             return Company::trash(&key, &pool);
-        } else if params.mode == "restore" {
+        } else if form.mode == "restore" {
             return Company::restore(&key, &pool);
         }
         return Company::erase(&key, &pool);

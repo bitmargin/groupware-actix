@@ -47,9 +47,9 @@ async fn main() -> std::io::Result<()> {
     };
 
     // start http server
-    let addr = format!("{}:{}", config::host(), config::port());
+    let endpoint = format!("{}:{}", config::host(), config::port());
     HttpServer::new(app)
-        .bind(addr)?
+        .bind(endpoint)?
         .run()
         .await
 }
