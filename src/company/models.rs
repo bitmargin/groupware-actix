@@ -131,14 +131,14 @@ impl Company {
         Ok(record)
     }
 
-    pub fn create(info: &web::Json<Company>, pool: &DbPool) -> Result<Company, &'static str> {
+    pub fn create(payload: &web::Json<Company>, pool: &DbPool) -> Result<Company, &'static str> {
         let conn: DbConn = pool.get().unwrap();
         let db: Database<ReqwestClient> = conn.db(&db_database()).unwrap();
         let collection: Collection<ReqwestClient> = db.collection("companies").unwrap();
         let now = Utc::now();
         let data = Company {
-            name: info.name.clone(),
-            since: info.since,
+            name: payload.name.clone(),
+            since: payload.since,
             created_at: Some(now),
             modified_at: Some(now),
             deleted_at: None,
@@ -151,7 +151,7 @@ impl Company {
         Ok(record.clone())
     }
 
-    pub fn update(key: &String, info: &web::Json<Company>, pool: &DbPool) -> Result<Company, &'static str> {
+    pub fn update(key: &String, payload: &web::Json<Company>, pool: &DbPool) -> Result<Company, &'static str> {
         let conn: DbConn = pool.get().unwrap();
         let db: Database<ReqwestClient> = conn.db(&db_database()).unwrap();
         let collection: Collection<ReqwestClient> = db.collection("companies").unwrap();
@@ -160,11 +160,11 @@ impl Company {
         });
         let text: String = to_string(&obj).unwrap();
         let mut data: Company = from_str::<Company>(&text).unwrap();
-        if info.name.is_some() {
-            data.name = info.name.clone();
+        if payload.name.is_some() {
+            data.name = payload.name.clone();
         }
-        if info.since.is_some() {
-            data.since = info.since.clone();
+        if payload.since.is_some() {
+            data.since = payload.since.clone();
         }
         let options: UpdateOptions = UpdateOptions::builder()
             .return_new(true)

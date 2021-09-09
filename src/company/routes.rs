@@ -9,10 +9,10 @@ use crate::database::DbPool;
 
 #[get("/companies")]
 async fn find(
-    info: web::Query<FindCompaniesParams>,
+    payload: web::Query<FindCompaniesParams>,
     pool: web::Data<DbPool>,
 ) -> Result<HttpResponse, Error> {
-    let params: FindCompaniesParams = info.into_inner();
+    let params: FindCompaniesParams = payload.into_inner();
     match params.check_valid() {
         Ok(_) => {
             let result = web::block(move || Company::find(params, &pool)).await?;
@@ -35,20 +35,20 @@ async fn show(
 
 #[post("/companies")]
 async fn create(
-    info: web::Json<Company>,
+    payload: web::Json<Company>,
     pool: web::Data<DbPool>,
 ) -> Result<HttpResponse, Error> {
-    let result = web::block(move || Company::create(&info, &pool)).await?;
+    let result = web::block(move || Company::create(&payload, &pool)).await?;
     Ok(HttpResponse::Ok().json(result))
 }
 
 #[put("/companies/{key}")]
 async fn update(
     web::Path(key): web::Path<String>,
-    info: web::Json<Company>,
+    payload: web::Json<Company>,
     pool: web::Data<DbPool>,
 ) -> Result<HttpResponse, Error> {
-    let result = web::block(move || Company::update(&key, &info, &pool)).await?;
+    let result = web::block(move || Company::update(&key, &payload, &pool)).await?;
     Ok(HttpResponse::Ok().json(result))
 }
 
