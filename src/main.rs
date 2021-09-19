@@ -6,6 +6,7 @@ use std::time::Duration;
 mod config;
 mod database;
 mod company;
+mod user;
 
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
@@ -42,6 +43,7 @@ async fn main() -> std::io::Result<()> {
                 web::scope("/api").service(
                     web::scope("/v1")
                         .configure(company::init)
+                        .configure(user::init)
                 )
             )
     };

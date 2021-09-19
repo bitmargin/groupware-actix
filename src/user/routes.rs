@@ -1,37 +1,52 @@
 use actix_web::{delete, get, post, put, web, Error, HttpRequest, HttpResponse, Responder};
+use actix_multipart::Multipart;
+use futures::executor::block_on;
 
-use crate::company::{Company, CompanyResquest};
-use crate::database::{DbConn, DbPool};
+use crate::user::{
+    User,
+    FindUsersParams,
+    DeleteUserParams,
+};
+use crate::database::DbPool;
 
-#[get("/companies")]
-async fn find_all(
-    req: HttpRequest,
+#[get("/users")]
+async fn find(
+    payload: web::Query<FindUsersParams>,
     pool: web::Data<DbPool>,
-) -> impl Responder {
-    let result = web::block(move || {
-        let conn: DbConn = pool.get().unwrap();
-        let db: Database<ReqwestClient> = conn.db(&db_database()).unwrap();
-        let aql = AqlQuery::builder()
-            .query("FOR c IN @@collection LIMIT 10 RETURN c")
-            .bind_var("@collection", "companies")
-            .build();
-        let results: Vec<Company> = db.aql_query(aql).unwrap();
-        Ok::<_, serde_json::error::Error>(serde_json::to_string(&results))
-    })
-    .await
-    .map_err(Error::from)?;
+) -> Result<HttpResponse, Error> {
+    let params: FindUsersParams = payload.into_inner();
+    match params.check_valid() {
+        Ok(_) => {
+            let result = web::block(move || User::find(params, &pool)).await?;
+            Ok(HttpResponse::Ok().json(result))
+        },
+        Err(e) => {
+            Ok(HttpResponse::BadRequest().json(e.errors()))
+        },
+    }
+}
 
+#[post("/users")]
+async fn create(
+    payload: Multipart,
+    pool: web::Data<DbPool>,
+) -> Result<HttpResponse, Error> {
+    let result = block_on(User::create(payload, &pool));
     match result {
-        Ok(v) => HttpResponse::Ok().json(v),
-        Err(e) => HttpResponse::BadRequest().body("Error trying to read all todos from database"),
+        Ok(r) => {
+            Ok(HttpResponse::Ok().json(r))
+        },
+        Err(e) => {
+            Ok(HttpResponse::BadRequest().json("create user failed"))
+        },
     }
 }
 
 // function that will be called on new Application to configure routes for this module
 pub fn init(cfg: &mut web::ServiceConfig) {
-    cfg.service(find_all);
-    // cfg.service(find);
-    // cfg.service(create);
+    cfg.service(find);
+    // cfg.service(show);
+    cfg.service(create);
     // cfg.service(update);
     // cfg.service(delete);
 }
