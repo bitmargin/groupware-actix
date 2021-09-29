@@ -1,4 +1,4 @@
-use actix_multipart::Multipart;
+use actix_multipart::{Field, Multipart};
 use actix_web::{web, Error, HttpRequest, HttpResponse, Responder};
 use arangors::{
     document::{
@@ -13,11 +13,14 @@ use futures::{StreamExt, TryStreamExt}; // for next or try_next of Multipart
 use futures::future::{ready, Ready};
 use serde::{Deserialize, Serialize};
 use serde_json::{from_str, json, to_string, to_value, Value};
-use std::collections::HashMap;
-use std::env;
-use std::fs::File;
-use std::io::Write;
-use std::str;
+use std::{
+    collections::HashMap,
+    env,
+    fs::File,
+    io::Write,
+    str,
+    vec::Vec,
+};
 use uclient::reqwest::ReqwestClient;
 use validator::{Validate, ValidationError, ValidationErrors};
 
@@ -176,29 +179,28 @@ impl User {
             println!("content_type {}", content_type);
             match (content_type.type_(), content_type.subtype()) {
                 (mime::APPLICATION, mime::OCTET_STREAM) => {
-                    while let Some(chunk) = field.next().await {
-                        let data = chunk.unwrap();
-                        println!("123 {}", str::from_utf8(&data).unwrap());
-                        vars.insert(String::from(name), to_value(str::from_utf8(&data).unwrap()).unwrap());
+                    let mut body = Vec::with_capacity(512);
+                    // field data may be larger than 64KB or it may be on page boundary
+                    while let Ok(Some(chunk)) = field.try_next().await {
+                        body.extend_from_slice(&chunk);
                     }
+                    vars.insert(String::from(name), to_value(str::from_utf8(&body)?)?);
                 },
                 (mime::IMAGE, _) => {
                     let filename = content_disposition.get_filename().unwrap();
                     println!("filename {}", filename);
                     let uniqname = sanitize_filename::sanitize(filename);
-                    let mut filepath = env::current_dir().unwrap();
+                    let mut filepath = env::current_dir()?;
                     filepath.push("storage");
                     filepath.push(&uniqname);
-                    let mut f: File = web::block(|| File::create(filepath)).await?;
-                    while let Some(chunk) = field.next().await {
-                        println!("456");
-                        let data = chunk.unwrap();
-                        f = web::block(move || f.write_all(&data).map(|_| f)).await?;
-                        println!("789");
+                    let mut f = web::block(|| File::create(filepath)).await?;
+                    // field data may be larger than 64KB or it may be on page boundary
+                    while let Ok(Some(chunk)) = field.try_next().await {
+                        f = web::block(move || f.write_all(&chunk).map(|_| f)).await?;
                     }
                     web::block(move || f.flush()).await?;
                     let pathtext = format!("/storage/{}", uniqname);
-                    vars.insert(String::from(name), to_value(pathtext).unwrap());
+                    vars.insert(String::from(name), to_value(pathtext)?);
                 },
                 _ => {}
             }

@@ -1,6 +1,5 @@
 use actix_web::{delete, get, post, put, web, Error, HttpRequest, HttpResponse, Responder};
 use actix_multipart::Multipart;
-use futures::executor::block_on;
 
 use crate::user::{
     User,
@@ -31,7 +30,7 @@ async fn create(
     payload: Multipart,
     pool: web::Data<DbPool>,
 ) -> Result<HttpResponse, Error> {
-    let result = block_on(User::create(payload, &pool));
+    let result = User::create(payload, &pool).await;
     match result {
         Ok(r) => {
             Ok(HttpResponse::Ok().json(r))
