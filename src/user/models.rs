@@ -1,4 +1,4 @@
-use actix_multipart::{Field, Multipart};
+use actix_multipart::{Multipart};
 use actix_web::{web, Error, HttpRequest, HttpResponse, Responder};
 use arangors::{
     document::{
@@ -9,8 +9,10 @@ use arangors::{
 };
 use bcrypt::{DEFAULT_COST, hash, verify};
 use chrono::prelude::*;
-use futures::{StreamExt, TryStreamExt}; // for next or try_next of Multipart
-use futures::future::{ready, Ready};
+use futures::{
+    future::{ready, Ready},
+    StreamExt, TryStreamExt, // for next or try_next of Multipart
+};
 use serde::{Deserialize, Serialize};
 use serde_json::{from_str, json, to_string, to_value, Value};
 use std::{
@@ -90,6 +92,20 @@ pub struct User {
     pub deleted_at: Option<DateTime<Utc>>,
 }
 
+impl Default for User {
+    fn default() -> User {
+        User {
+            name: None,
+            email: None,
+            password: None,
+            avatar: None,
+            created_at: None,
+            modified_at: None,
+            deleted_at: None,
+        }
+    }
+}
+
 impl Clone for User {
     fn clone(&self) -> User {
         User {
@@ -118,6 +134,48 @@ impl Responder for User {
                 .body(body)
         ))
     }
+}
+
+async fn accept_uploading(
+    mut payload: Multipart
+) -> Result<HashMap<String, String>, Error> {
+    let mut vars: HashMap<String, String> = HashMap::new();
+
+    while let Ok(Some(mut field)) = payload.try_next().await {
+        let content_disposition = field.content_disposition().unwrap();
+        let name = content_disposition.get_name().unwrap();
+        let content_type = field.content_type();
+
+        match (content_type.type_(), content_type.subtype()) {
+            (mime::APPLICATION, mime::OCTET_STREAM) => {
+                let mut body = Vec::with_capacity(512);
+                // field data may be larger than 64KB or it may be on page boundary
+                while let Ok(Some(chunk)) = field.try_next().await {
+                    body.extend_from_slice(&chunk);
+                }
+                let val = String::from_utf8(body).unwrap();
+                vars.insert(String::from(name), val);
+            },
+            (mime::IMAGE, _) => {
+                let filename = content_disposition.get_filename().unwrap();
+                let uniqname = sanitize_filename::sanitize(filename);
+                let mut filepath = env::current_dir()?;
+                filepath.push("storage");
+                filepath.push(&uniqname);
+                let mut f = web::block(|| File::create(filepath)).await?;
+                // field data may be larger than 64KB or it may be on page boundary
+                while let Ok(Some(chunk)) = field.try_next().await {
+                    f = web::block(move || f.write_all(&chunk).map(|_| f)).await?;
+                }
+                web::block(move || f.flush()).await?;
+                let pathtext = format!("/storage/{}", uniqname);
+                vars.insert(String::from(name), pathtext);
+            },
+            _ => {}
+        }
+    }
+
+    Ok(vars)
 }
 
 // Implementation for User struct, functions for read/write/update and delete todo from database
@@ -163,48 +221,13 @@ impl User {
         Ok(record)
     }
 
-    pub async fn create(mut payload: Multipart, pool: &DbPool) -> Result<User, Error> {
+    pub async fn create(payload: Multipart, pool: &DbPool) -> Result<User, Error> {
         let conn: DbConn = pool.get().unwrap();
         let db: Database<ReqwestClient> = conn.db(&db_database()).unwrap();
         let collection: Collection<ReqwestClient> = db.collection("users").unwrap();
         let now = Utc::now();
 
-        let mut vars: HashMap<String, Value> = HashMap::new();
-        while let Ok(Some(mut field)) = payload.try_next().await {
-            let content_disposition = field.content_disposition().unwrap();
-            println!("content_disposition {}", content_disposition);
-            let name = content_disposition.get_name().unwrap();
-            println!("name {}", name);
-            let content_type = field.content_type();
-            println!("content_type {}", content_type);
-            match (content_type.type_(), content_type.subtype()) {
-                (mime::APPLICATION, mime::OCTET_STREAM) => {
-                    let mut body = Vec::with_capacity(512);
-                    // field data may be larger than 64KB or it may be on page boundary
-                    while let Ok(Some(chunk)) = field.try_next().await {
-                        body.extend_from_slice(&chunk);
-                    }
-                    vars.insert(String::from(name), to_value(str::from_utf8(&body)?)?);
-                },
-                (mime::IMAGE, _) => {
-                    let filename = content_disposition.get_filename().unwrap();
-                    println!("filename {}", filename);
-                    let uniqname = sanitize_filename::sanitize(filename);
-                    let mut filepath = env::current_dir()?;
-                    filepath.push("storage");
-                    filepath.push(&uniqname);
-                    let mut f = web::block(|| File::create(filepath)).await?;
-                    // field data may be larger than 64KB or it may be on page boundary
-                    while let Ok(Some(chunk)) = field.try_next().await {
-                        f = web::block(move || f.write_all(&chunk).map(|_| f)).await?;
-                    }
-                    web::block(move || f.flush()).await?;
-                    let pathtext = format!("/storage/{}", uniqname);
-                    vars.insert(String::from(name), to_value(pathtext)?);
-                },
-                _ => {}
-            }
-        }
+        let vars: HashMap<String, String> = accept_uploading(payload).await?;
 
         let password = vars.get("password").unwrap().to_string();
         let data = User {
@@ -216,15 +239,6 @@ impl User {
             modified_at: Some(now),
             deleted_at: None,
         };
-        // let data = User {
-        //     name: Some("qwe".to_string()),
-        //     email: Some("fgh@rty.com".to_string()),
-        //     password: Some(hash("123456".to_string(), DEFAULT_COST).unwrap()),
-        //     avatar: Some("".to_string()),
-        //     created_at: Some(now),
-        //     modified_at: Some(now),
-        //     deleted_at: None,
-        // };
         let options: InsertOptions = InsertOptions::builder()
             .return_new(true)
             .build();
