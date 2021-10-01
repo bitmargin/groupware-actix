@@ -92,20 +92,6 @@ pub struct User {
     pub deleted_at: Option<DateTime<Utc>>,
 }
 
-impl Default for User {
-    fn default() -> User {
-        User {
-            name: None,
-            email: None,
-            password: None,
-            avatar: None,
-            created_at: None,
-            modified_at: None,
-            deleted_at: None,
-        }
-    }
-}
-
 impl Clone for User {
     fn clone(&self) -> User {
         User {
@@ -183,18 +169,18 @@ impl User {
     pub fn find(params: FindUsersParams, pool: &DbPool) -> Result<Vec<User>, ValidationErrors> {
         let conn: DbConn = pool.get().unwrap();
         let db: Database<ReqwestClient> = conn.db(&db_database()).unwrap();
-        let mut terms = vec!["FOR c IN users"];
+        let mut terms = vec!["FOR x IN users"];
         let mut vars: HashMap<&str, Value> = HashMap::new();
         if params.search.is_some() {
             let search: String = params.search.unwrap().trim().to_string();
             if !search.is_empty() {
-                terms.push("FILTER CONTAINS(c.name, @@search)");
+                terms.push("FILTER CONTAINS(x.name, @@search)");
                 vars.insert("@search", to_value(search).unwrap());
             }
         }
         if params.sort_by.is_some() {
             let sort_by: String = params.sort_by.unwrap();
-            terms.push("SORT c.@@sort_by ASC");
+            terms.push("SORT x.@@sort_by ASC");
             vars.insert("@sort_by", to_value(sort_by).unwrap());
         }
         if params.limit.is_some() {
@@ -202,7 +188,7 @@ impl User {
             terms.push("LIMIT 0, @@limit");
             vars.insert("@limit", to_value(limit).unwrap());
         }
-        terms.push("RETURN c");
+        terms.push("RETURN UNSET(x, 'password')");
         let q = terms.join(" ");
         let aql = AqlQuery::builder()
             .query(&q)
