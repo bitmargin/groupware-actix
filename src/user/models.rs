@@ -5,7 +5,7 @@ use arangors::{
         options::{InsertOptions, RemoveOptions, UpdateOptions},
         response::DocumentResponse,
     },
-    AqlQuery, Collection, Database, Document,
+    AqlQuery, Collection, Cursor, Database, Document,
 };
 use bcrypt::{DEFAULT_COST, hash, verify};
 use chrono::prelude::*;
@@ -122,6 +122,20 @@ impl Responder for User {
     }
 }
 
+#[derive(Debug, Deserialize, Serialize)]
+pub struct UserResponse {
+    pub _id: String,
+    pub _key: String,
+    pub _rev: String,
+    pub name: String,
+    pub email: String,
+    pub avatar: String,
+    pub created_at: DateTime<Utc>,
+    pub modified_at: DateTime<Utc>,
+    #[serde(skip_serializing_if = "Option::is_none")] // if none, excluded from query
+    pub deleted_at: Option<DateTime<Utc>>,
+}
+
 async fn accept_uploading(
     mut payload: Multipart
 ) -> Result<HashMap<String, String>, Error> {
@@ -166,7 +180,10 @@ async fn accept_uploading(
 
 // Implementation for User struct, functions for read/write/update and delete todo from database
 impl User {
-    pub fn find(params: FindUsersParams, pool: &DbPool) -> Result<Vec<User>, ValidationErrors> {
+    pub fn find(
+        params: FindUsersParams,
+        pool: &DbPool,
+    ) -> Result<Vec<UserResponse>, ValidationErrors> {
         let conn: DbConn = pool.get().unwrap();
         let db: Database<ReqwestClient> = conn.db(&db_database()).unwrap();
         let mut terms = vec!["FOR x IN users"];
@@ -194,7 +211,7 @@ impl User {
             .query(&q)
             .bind_vars(vars)
             .build();
-        let records: Vec<User> = db.aql_query(aql).expect("Query failed");
+        let records: Vec<UserResponse> = db.aql_query(aql).expect("Query failed");
         Ok(records)
     }
 
@@ -207,7 +224,10 @@ impl User {
         Ok(record)
     }
 
-    pub async fn create(payload: Multipart, pool: &DbPool) -> Result<User, Error> {
+    pub async fn create(
+        payload: Multipart,
+        pool: &DbPool,
+    ) -> Result<UserResponse, Error> {
         let conn: DbConn = pool.get().unwrap();
         let db: Database<ReqwestClient> = conn.db(&db_database()).unwrap();
         let collection: Collection<ReqwestClient> = db.collection("users").unwrap();
@@ -229,8 +249,20 @@ impl User {
             .return_new(true)
             .build();
         let res: DocumentResponse<Document<User>> = collection.create_document(Document::new(data), options).unwrap();
-        let record: &User = res.new_doc().unwrap();
-        Ok(record.clone())
+        let doc: &User = res.new_doc().unwrap();
+        let record: User = doc.clone();
+        let header = res.header().unwrap();
+        Ok(UserResponse {
+            _id: header._id.clone(),
+            _key: header._key.clone(),
+            _rev: header._rev.clone(),
+            name: record.name.unwrap(),
+            email: record.email.unwrap(),
+            avatar: record.avatar.unwrap(),
+            created_at: record.created_at.unwrap(),
+            modified_at: record.modified_at.unwrap(),
+            deleted_at: record.deleted_at,
+        })
     }
 
     pub fn update(key: &String, payload: &web::Json<User>, pool: &DbPool) -> Result<User, &'static str> {
