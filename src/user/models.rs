@@ -2,7 +2,7 @@ use actix_multipart::{Multipart};
 use actix_web::{
     error::ErrorBadRequest,
     web,
-    Error, HttpRequest, HttpResponse, Responder,
+    Error,
 };
 use arangors::{
     document::{
@@ -14,7 +14,6 @@ use arangors::{
 use bcrypt::{DEFAULT_COST, hash, verify};
 use chrono::prelude::*;
 use futures::{
-    future::{ready, Ready},
     StreamExt, TryStreamExt, // for next or try_next of Multipart
 };
 use serde::{Deserialize, Serialize};
@@ -73,13 +72,9 @@ pub struct DeleteUserParams {
 
 fn validate_mode(mode: &str) -> Result<(), ValidationError> {
     match mode {
-        "erase" => Ok(()),
+        "erase" | "trash" | "restore" => Ok(()),
         _ => Err(ValidationError::new("Wrong mode")),
     }
-    // if mode != "erase" && mode != "trash" && mode != "restore" {
-    //     return Err(ValidationError::new("Wrong mode"));
-    // }
-    // Ok(())
 }
 
 #[derive(Debug, Validate, Serialize, Deserialize)]
