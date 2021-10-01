@@ -1,5 +1,6 @@
 use actix_web::{delete, get, post, put, web, Error, HttpRequest, HttpResponse, Responder};
 use actix_multipart::Multipart;
+use serde_json::{from_str, json, Value};
 
 use crate::user::{
     FindUsersParams,
@@ -51,7 +52,12 @@ async fn create(
             Ok(HttpResponse::Ok().json(r))
         },
         Err(e) => {
-            Ok(HttpResponse::BadRequest().json("create user failed"))
+            let reason: Value = from_str(e.to_string().as_str()).unwrap();
+            let obj = json!({
+                "success": false,
+                "messages": reason,
+            });
+            Ok(HttpResponse::BadRequest().json(obj))
         },
     }
 }
@@ -81,19 +87,15 @@ async fn delete(
 ) -> Result<HttpResponse, Error> {
     let mode = form.mode.clone();
     let result = web::block(move || {
-        if form.mode == "erase" {
-            return erase_user(&key, &pool);
-        } else if form.mode == "trash" {
-            return trash_user(&key, &pool);
-        } else if form.mode == "restore" {
-            return restore_user(&key, &pool);
+        match form.mode.as_str() {
+            "trash" => trash_user(&key, &pool),
+            "restore" => restore_user(&key, &pool),
+            "erase" | _ => erase_user(&key, &pool),
         }
-        return erase_user(&key, &pool);
     }).await?;
-    if mode == "erase" {
-        return Ok(HttpResponse::NoContent().json({}));
-    } else {
-        return Ok(HttpResponse::Ok().json(result));
+    match mode.as_str() {
+        "trash" | "restore" => Ok(HttpResponse::Ok().json(result)),
+        "erase" | _ => Ok(HttpResponse::NoContent().json({})),
     }
 }
 

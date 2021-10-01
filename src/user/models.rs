@@ -1,11 +1,15 @@
 use actix_multipart::{Multipart};
-use actix_web::{web, Error, HttpRequest, HttpResponse, Responder};
+use actix_web::{
+    error::ErrorBadRequest,
+    web,
+    Error, HttpRequest, HttpResponse, Responder,
+};
 use arangors::{
     document::{
         options::{InsertOptions, RemoveOptions, UpdateOptions},
         response::DocumentResponse,
     },
-    AqlQuery, Collection, Cursor, Database, Document,
+    AqlQuery, Collection, Database, Document,
 };
 use bcrypt::{DEFAULT_COST, hash, verify};
 use chrono::prelude::*;
@@ -68,20 +72,59 @@ pub struct DeleteUserParams {
 }
 
 fn validate_mode(mode: &str) -> Result<(), ValidationError> {
-    if mode != "erase" && mode != "trash" && mode != "restore" {
-        return Err(ValidationError::new("Wrong mode"));
+    match mode {
+        "erase" => Ok(()),
+        _ => Err(ValidationError::new("Wrong mode")),
     }
-    Ok(())
+    // if mode != "erase" && mode != "trash" && mode != "restore" {
+    //     return Err(ValidationError::new("Wrong mode"));
+    // }
+    // Ok(())
 }
 
-#[derive(Debug, Serialize, Deserialize)]
-struct UserRequest {
+#[derive(Debug, Validate, Serialize, Deserialize)]
+struct CreateUserRequest {
+    #[validate(required)]
+    pub name: Option<String>,
+    #[validate(required, email)]
+    pub email: Option<String>,
+    #[validate(required, length(min = 6))]
+    pub password: Option<String>,
+    #[validate(required, must_match = "password")]
+    pub password_confirmation: Option<String>,
+    #[validate(required)]
+    pub avatar: Option<String>,
+    pub created_at: DateTime<Utc>,
+    pub modified_at: DateTime<Utc>,
+}
+
+impl Clone for CreateUserRequest {
+    fn clone(&self) -> CreateUserRequest {
+        CreateUserRequest {
+            name: self.name.clone(),
+            email: self.email.clone(),
+            password: self.password.clone(),
+            password_confirmation: self.password_confirmation.clone(),
+            avatar: self.avatar.clone(),
+            created_at: self.created_at.clone(),
+            modified_at: self.modified_at.clone(),
+        }
+    }
+}
+
+#[derive(Debug, Validate, Serialize, Deserialize)]
+struct UpdateUserRequest {
     #[serde(skip_serializing_if = "Option::is_none")] // if none, excluded from query
     pub name: Option<String>,
+    #[validate(email)]
     #[serde(skip_serializing_if = "Option::is_none")] // if none, excluded from query
     pub email: Option<String>,
+    #[validate(length(min = 6))]
     #[serde(skip_serializing_if = "Option::is_none")] // if none, excluded from query
     pub password: Option<String>,
+    #[validate(must_match = "password")]
+    #[serde(skip_serializing_if = "Option::is_none")] // if none, excluded from query
+    pub password_confirmation: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")] // if none, excluded from query
     pub avatar: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")] // if none, excluded from query
@@ -92,12 +135,13 @@ struct UserRequest {
     pub deleted_at: Option<DateTime<Utc>>,
 }
 
-impl Clone for UserRequest {
-    fn clone(&self) -> UserRequest {
-        UserRequest {
+impl Clone for UpdateUserRequest {
+    fn clone(&self) -> UpdateUserRequest {
+        UpdateUserRequest {
             name: self.name.clone(),
             email: self.email.clone(),
             password: self.password.clone(),
+            password_confirmation: self.password_confirmation.clone(),
             avatar: self.avatar.clone(),
             created_at: self.created_at.clone(),
             modified_at: self.modified_at.clone(),
@@ -114,27 +158,10 @@ pub struct UserResponse {
     pub name: String,
     pub email: String,
     pub avatar: String,
-    #[serde(skip_serializing_if = "Option::is_none")] // if none, excluded from query
-    pub created_at: Option<DateTime<Utc>>,
+    pub created_at: DateTime<Utc>,
     pub modified_at: DateTime<Utc>,
     #[serde(skip_serializing_if = "Option::is_none")] // if none, excluded from query
     pub deleted_at: Option<DateTime<Utc>>,
-}
-
-impl Responder for UserResponse {
-    type Error = Error;
-    type Future = Ready<Result<HttpResponse, Error>>;
-
-    fn respond_to(self, _req: &HttpRequest) -> Self::Future {
-        let body = serde_json::to_string(&self).unwrap();
-
-        // Create response and set content type
-        ready(Ok(
-            HttpResponse::Ok()
-                .content_type("application/json")
-                .body(body)
-        ))
-    }
 }
 
 async fn accept_uploading(
@@ -180,6 +207,7 @@ async fn accept_uploading(
 }
 
 // Implementation for read/write/update/delete from database
+
 pub fn find_users(
     params: FindUsersParams,
     pool: &DbPool,
@@ -215,7 +243,10 @@ pub fn find_users(
     Ok(records)
 }
 
-pub fn show_user(key: &String, pool: &DbPool) -> Result<UserResponse, &'static str> {
+pub fn show_user(
+    key: &String,
+    pool: &DbPool,
+) -> Result<UserResponse, &'static str> {
     let conn: DbConn = pool.get().unwrap();
     let db: Database<ReqwestClient> = conn.db(&db_database()).unwrap();
     let collection: Collection<ReqwestClient> = db.collection("users").unwrap();
@@ -234,35 +265,66 @@ pub async fn create_user(
     let now = Utc::now();
 
     let vars: HashMap<String, String> = accept_uploading(payload).await?;
-
-    let password = vars.get("password").unwrap().to_string();
-    let data = UserRequest {
-        name: Some(vars.get("name").unwrap().to_string()),
-        email: Some(vars.get("email").unwrap().to_string()),
-        password: Some(hash(password, DEFAULT_COST).unwrap()),
-        avatar: Some(vars.get("avatar").unwrap().to_string()),
-        created_at: Some(now),
-        modified_at: Some(now),
-        deleted_at: None,
+    let mut req = CreateUserRequest {
+        name: if vars.contains_key("name") {
+            Some(vars.get("name").unwrap().to_string())
+        } else {
+            None
+        },
+        email: if vars.contains_key("email") {
+            Some(vars.get("email").unwrap().to_string())
+        } else {
+            None
+        },
+        password: if vars.contains_key("password") {
+            Some(vars.get("password").unwrap().to_string())
+        } else {
+            None
+        },
+        password_confirmation: if vars.contains_key("password_confirmation") {
+            Some(vars.get("password_confirmation").unwrap().to_string())
+        } else {
+            None
+        },
+        avatar: if (vars.contains_key("avatar")) {
+            Some(vars.get("avatar").unwrap().to_string())
+        } else {
+            None
+        },
+        created_at: now,
+        modified_at: now,
     };
-    let options: InsertOptions = InsertOptions::builder()
-        .return_new(true)
-        .build();
-    let res: DocumentResponse<Document<UserRequest>> = collection.create_document(Document::new(data), options).unwrap();
-    let doc: &UserRequest = res.new_doc().unwrap();
-    let record: UserRequest = doc.clone();
-    let header = res.header().unwrap();
-    Ok(UserResponse {
-        _id: header._id.clone(),
-        _key: header._key.clone(),
-        _rev: header._rev.clone(),
-        name: record.name.unwrap(),
-        email: record.email.unwrap(),
-        avatar: record.avatar.unwrap(),
-        created_at: record.created_at,
-        modified_at: record.modified_at.unwrap(),
-        deleted_at: record.deleted_at,
-    })
+
+    match req.validate() {
+        Ok(_) => {
+            req.password = Some(hash(req.password.unwrap(), DEFAULT_COST).unwrap());
+            req.password_confirmation = None;
+
+            let options: InsertOptions = InsertOptions::builder()
+                .return_new(true)
+                .build();
+            let res: DocumentResponse<Document<CreateUserRequest>> = collection.create_document(Document::new(req), options).unwrap();
+            let doc: &CreateUserRequest = res.new_doc().unwrap();
+            let record: CreateUserRequest = doc.clone();
+            let header = res.header().unwrap();
+            Ok(UserResponse {
+                _id: header._id.clone(),
+                _key: header._key.clone(),
+                _rev: header._rev.clone(),
+                name: record.name.unwrap(),
+                email: record.email.unwrap(),
+                avatar: record.avatar.unwrap(),
+                created_at: record.created_at,
+                modified_at: record.modified_at,
+                deleted_at: None,
+            })
+        },
+        Err(e) => {
+            let errs = e.field_errors();
+            let text = to_string(&errs).unwrap();
+            Err(ErrorBadRequest(text))
+        }
+    }
 }
 
 pub async fn update_user(
@@ -276,9 +338,7 @@ pub async fn update_user(
     let now = Utc::now();
 
     let vars: HashMap<String, String> = accept_uploading(payload).await?;
-
-    let password = vars.get("password").unwrap().to_string();
-    let data = UserRequest {
+    let mut req = UpdateUserRequest {
         name: if vars.contains_key("name") {
             Some(vars.get("name").unwrap().to_string())
         } else {
@@ -290,7 +350,14 @@ pub async fn update_user(
             None
         },
         password: if vars.contains_key("password") {
-            Some(hash(password, DEFAULT_COST).unwrap())
+            let pswd = vars.get("password").unwrap().to_string();
+            Some(hash(pswd, DEFAULT_COST).unwrap())
+        } else {
+            None
+        },
+        password_confirmation: if vars.contains_key("password_confirmation") {
+            let pswd = vars.get("password_confirmation").unwrap().to_string();
+            Some(hash(pswd, DEFAULT_COST).unwrap())
         } else {
             None
         },
@@ -303,13 +370,20 @@ pub async fn update_user(
         modified_at: Some(now),
         deleted_at: None,
     };
+
+    req.validate().map_err(ErrorBadRequest);
+    if vars.contains_key("password") {
+        req.password = Some(hash(req.password.unwrap(), DEFAULT_COST).unwrap());
+        req.password_confirmation = None;
+    }
+
     let options: UpdateOptions = UpdateOptions::builder()
         .return_new(true)
         .return_old(true)
         .build();
-    let res: DocumentResponse<Document<UserRequest>> = collection.update_document(key, Document::new(data), options).unwrap();
-    let doc: &UserRequest = res.new_doc().unwrap();
-    let record: UserRequest = doc.clone();
+    let res: DocumentResponse<Document<UpdateUserRequest>> = collection.update_document(key, Document::new(req), options).unwrap();
+    let doc: &UpdateUserRequest = res.new_doc().unwrap();
+    let record: UpdateUserRequest = doc.clone();
     let header = res.header().unwrap();
     Ok(UserResponse {
         _id: header._id.clone(),
@@ -318,22 +392,25 @@ pub async fn update_user(
         name: record.name.unwrap(),
         email: record.email.unwrap(),
         avatar: record.avatar.unwrap(),
-        created_at: record.created_at,
+        created_at: record.created_at.unwrap(),
         modified_at: record.modified_at.unwrap(),
         deleted_at: record.deleted_at,
     })
 }
 
-pub fn erase_user(key: &String, pool: &DbPool) -> Result<UserResponse, &'static str> {
+pub fn erase_user(
+    key: &String,
+    pool: &DbPool,
+) -> Result<UserResponse, &'static str> {
     let conn: DbConn = pool.get().unwrap();
     let db: Database<ReqwestClient> = conn.db(&db_database()).unwrap();
     let collection: Collection<ReqwestClient> = db.collection("users").unwrap();
     let options: RemoveOptions = RemoveOptions::builder()
         .return_old(true)
         .build();
-    let res: DocumentResponse<Document<UserRequest>> = collection.remove_document(key.as_ref(), options, None).unwrap();
-    let doc: &UserRequest = res.new_doc().unwrap();
-    let record: UserRequest = doc.clone();
+    let res: DocumentResponse<Document<UpdateUserRequest>> = collection.remove_document(key.as_ref(), options, None).unwrap();
+    let doc: &UpdateUserRequest = res.old_doc().unwrap();
+    let record: UpdateUserRequest = doc.clone();
     let header = res.header().unwrap();
     Ok(UserResponse {
         _id: header._id.clone(),
@@ -342,13 +419,16 @@ pub fn erase_user(key: &String, pool: &DbPool) -> Result<UserResponse, &'static 
         name: record.name.unwrap(),
         email: record.email.unwrap(),
         avatar: record.avatar.unwrap(),
-        created_at: record.created_at,
+        created_at: record.created_at.unwrap(),
         modified_at: record.modified_at.unwrap(),
         deleted_at: record.deleted_at,
     })
 }
 
-pub fn trash_user(key: &String, pool: &DbPool) -> Result<UserResponse, &'static str> {
+pub fn trash_user(
+    key: &String,
+    pool: &DbPool,
+) -> Result<UserResponse, &'static str> {
     let conn: DbConn = pool.get().unwrap();
     let db: Database<ReqwestClient> = conn.db(&db_database()).unwrap();
     let collection: Collection<ReqwestClient> = db.collection("users").unwrap();
@@ -356,14 +436,14 @@ pub fn trash_user(key: &String, pool: &DbPool) -> Result<UserResponse, &'static 
         "deleted_at": Utc::now(),
     });
     let text = to_string(&obj).unwrap();
-    let data: UserRequest = from_str::<UserRequest>(&text).unwrap();
+    let data: UpdateUserRequest = from_str::<UpdateUserRequest>(&text).unwrap();
     let options: UpdateOptions = UpdateOptions::builder()
         .return_new(true)
         .return_old(true)
         .build();
-    let res: DocumentResponse<Document<UserRequest>> = collection.update_document(key, Document::new(data), options).unwrap();
-    let doc: &UserRequest = res.new_doc().unwrap();
-    let record: UserRequest = doc.clone();
+    let res: DocumentResponse<Document<UpdateUserRequest>> = collection.update_document(key, Document::new(data), options).unwrap();
+    let doc: &UpdateUserRequest = res.new_doc().unwrap();
+    let record: UpdateUserRequest = doc.clone();
     let header = res.header().unwrap();
     Ok(UserResponse {
         _id: header._id.clone(),
@@ -372,25 +452,28 @@ pub fn trash_user(key: &String, pool: &DbPool) -> Result<UserResponse, &'static 
         name: record.name.unwrap(),
         email: record.email.unwrap(),
         avatar: record.avatar.unwrap(),
-        created_at: record.created_at,
+        created_at: record.created_at.unwrap(),
         modified_at: record.modified_at.unwrap(),
         deleted_at: record.deleted_at,
     })
 }
 
-pub fn restore_user(key: &String, pool: &DbPool) -> Result<UserResponse, &'static str> {
+pub fn restore_user(
+    key: &String,
+    pool: &DbPool,
+) -> Result<UserResponse, &'static str> {
     let conn: DbConn = pool.get().unwrap();
     let db: Database<ReqwestClient> = conn.db(&db_database()).unwrap();
     let collection: Collection<ReqwestClient> = db.collection("users").unwrap();
-    let data: UserRequest = from_str::<UserRequest>("{\"deleted_at\":null}").unwrap();
+    let data: UpdateUserRequest = from_str::<UpdateUserRequest>("{\"deleted_at\":null}").unwrap();
     let options: UpdateOptions = UpdateOptions::builder()
         .return_new(true)
         .return_old(true)
         .keep_null(false)
         .build();
-    let res: DocumentResponse<Document<UserRequest>> = collection.update_document(key, Document::new(data), options).unwrap();
-    let doc: &UserRequest = res.new_doc().unwrap();
-    let record: UserRequest = doc.clone();
+    let res: DocumentResponse<Document<UpdateUserRequest>> = collection.update_document(key, Document::new(data), options).unwrap();
+    let doc: &UpdateUserRequest = res.new_doc().unwrap();
+    let record: UpdateUserRequest = doc.clone();
     let header = res.header().unwrap();
     Ok(UserResponse {
         _id: header._id.clone(),
@@ -399,7 +482,7 @@ pub fn restore_user(key: &String, pool: &DbPool) -> Result<UserResponse, &'stati
         name: record.name.unwrap(),
         email: record.email.unwrap(),
         avatar: record.avatar.unwrap(),
-        created_at: record.created_at,
+        created_at: record.created_at.unwrap(),
         modified_at: record.modified_at.unwrap(),
         deleted_at: record.deleted_at,
     })
