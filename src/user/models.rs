@@ -13,10 +13,10 @@ pub struct FindUsersParams {
 }
 
 fn validate_sort_by(sort_by: &str) -> Result<(), ValidationError> {
-    if sort_by != "name" && sort_by != "since" {
-        return Err(ValidationError::new("Wrong sort_by"));
+    match sort_by {
+        "name" | "since" => Ok(()),
+        _ => Err(ValidationError::new("Wrong sort_by")),
     }
-    Ok(())
 }
 
 impl Clone for FindUsersParams {
