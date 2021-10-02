@@ -17,7 +17,7 @@ use validator::{Validate, ValidationError, ValidationErrors};
 use crate::config::db_database;
 use crate::database::{DbConn, DbPool};
 
-#[derive(Debug, Validate, Deserialize)]
+#[derive(Clone, Debug, Validate, Deserialize)]
 pub struct FindCompaniesParams {
     pub search: Option<String>,
     #[validate(custom = "validate_sort_by")]
@@ -31,16 +31,6 @@ fn validate_sort_by(sort_by: &str) -> Result<(), ValidationError> {
         return Err(ValidationError::new("Wrong sort_by"));
     }
     Ok(())
-}
-
-impl Clone for FindCompaniesParams {
-    fn clone(&self) -> FindCompaniesParams {
-        FindCompaniesParams {
-            search: self.search.clone(),
-            sort_by: self.sort_by.clone(),
-            limit: self.limit.clone(),
-        }
-    }
 }
 
 impl FindCompaniesParams {
@@ -62,7 +52,7 @@ fn validate_mode(mode: &str) -> Result<(), ValidationError> {
     Ok(())
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Company {
     #[serde(skip_serializing_if = "Option::is_none")] // if none, excluded from query
     pub name: Option<String>,
@@ -74,18 +64,6 @@ pub struct Company {
     pub modified_at: Option<DateTime<Utc>>,
     #[serde(skip_serializing_if = "Option::is_none")] // if none, excluded from query
     pub deleted_at: Option<DateTime<Utc>>,
-}
-
-impl Clone for Company {
-    fn clone(&self) -> Company {
-        Company {
-            name: self.name.clone(),
-            since: self.since.clone(),
-            created_at: self.created_at.clone(),
-            modified_at: self.modified_at.clone(),
-            deleted_at: self.deleted_at.clone(),
-        }
-    }
 }
 
 // Implementation for Company struct, functions for read/write/update and delete todo from database
