@@ -155,7 +155,7 @@ pub async fn create_user(
         } else {
             None
         },
-        avatar: if (vars.contains_key("avatar")) {
+        avatar: if vars.contains_key("avatar") {
             Some(vars.get("avatar").unwrap().to_string())
         } else {
             None
