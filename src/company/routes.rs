@@ -1,4 +1,5 @@
 use actix_web::{delete, get, post, put, web, Error, HttpResponse};
+use validator::Validate;
 
 use crate::company::{
     Company,
@@ -13,7 +14,7 @@ async fn find(
     pool: web::Data<DbPool>,
 ) -> Result<HttpResponse, Error> {
     let params: FindCompaniesParams = payload.into_inner();
-    match params.check_valid() {
+    match params.validate() {
         Ok(_) => {
             let result = web::block(move || Company::find(params, &pool)).await?;
             Ok(HttpResponse::Ok().json(result))

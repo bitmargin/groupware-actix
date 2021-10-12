@@ -1,6 +1,7 @@
 use actix_web::{delete, get, post, put, web, Error, HttpRequest, HttpResponse, Responder};
 use actix_multipart::Multipart;
 use serde_json::{from_str, json, Value};
+use validator::Validate;
 
 use crate::user::{
     FindUsersParams,
@@ -21,7 +22,7 @@ async fn find(
     pool: web::Data<DbPool>,
 ) -> Result<HttpResponse, Error> {
     let params: FindUsersParams = payload.into_inner();
-    match params.check_valid() {
+    match params.validate() {
         Ok(_) => {
             let result = web::block(move || find_users(params, &pool)).await?;
             Ok(HttpResponse::Ok().json(result))

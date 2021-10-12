@@ -19,12 +19,6 @@ fn validate_sort_by(sort_by: &str) -> Result<(), ValidationError> {
     }
 }
 
-impl FindUsersParams {
-    pub fn check_valid(&self) -> Result<(), ValidationErrors> { // public version of validate
-        self.validate()
-    }
-}
-
 #[derive(Debug, Validate, Deserialize)]
 pub struct DeleteUserParams {
     #[validate(custom = "validate_mode")]
