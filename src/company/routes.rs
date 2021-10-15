@@ -2,6 +2,7 @@ use actix_web::{delete, get, post, put, web, Error, HttpResponse};
 use validator::Validate;
 
 use crate::company::{
+    self,
     Company,
     FindCompaniesParams,
     DeleteCompanyParams,
@@ -16,7 +17,7 @@ async fn find(
     let params: FindCompaniesParams = payload.into_inner();
     match params.validate() {
         Ok(_) => {
-            let result = web::block(move || Company::find(params, &pool)).await?;
+            let result = company::find_companies(params, &pool).await.unwrap();
             Ok(HttpResponse::Ok().json(result))
         },
         Err(e) => {
@@ -27,10 +28,10 @@ async fn find(
 
 #[get("/companies/{key}")]
 async fn show(
-    web::Path(key): web::Path<String>,
+    key: web::Path<String>,
     pool: web::Data<DbPool>,
 ) -> Result<HttpResponse, Error> {
-    let result = web::block(move || Company::show(&key, &pool)).await?;
+    let result = company::show_company(&key, &pool).await.unwrap();
     Ok(HttpResponse::Ok().json(result))
 }
 
@@ -39,41 +40,42 @@ async fn create(
     payload: web::Json<Company>,
     pool: web::Data<DbPool>,
 ) -> Result<HttpResponse, Error> {
-    let result = web::block(move || Company::create(&payload, &pool)).await?;
+    let result = company::create_company(&payload, &pool).await.unwrap();
     Ok(HttpResponse::Ok().json(result))
 }
 
 #[put("/companies/{key}")]
 async fn update(
-    web::Path(key): web::Path<String>,
+    key: web::Path<String>,
     payload: web::Json<Company>,
     pool: web::Data<DbPool>,
 ) -> Result<HttpResponse, Error> {
-    let result = web::block(move || Company::update(&key, &payload, &pool)).await?;
+    let result = company::update_company(&key, &payload, &pool).await.unwrap();
     Ok(HttpResponse::Ok().json(result))
 }
 
 #[delete("/companies/{key}")]
 async fn delete(
-    web::Path(key): web::Path<String>,
+    key: web::Path<String>,
     form: web::Form<DeleteCompanyParams>,
     pool: web::Data<DbPool>,
 ) -> Result<HttpResponse, Error> {
-    let mode = form.mode.clone();
-    let result = web::block(move || {
-        if form.mode == "erase" {
-            return Company::erase(&key, &pool);
-        } else if form.mode == "trash" {
-            return Company::trash(&key, &pool);
-        } else if form.mode == "restore" {
-            return Company::restore(&key, &pool);
-        }
-        return Company::erase(&key, &pool);
-    }).await?;
-    if mode == "erase" {
-        return Ok(HttpResponse::NoContent().json({}));
-    } else {
-        return Ok(HttpResponse::Ok().json(result));
+    match form.mode.as_str() {
+        "erase" => {
+            let result = company::erase_company(&key, &pool).await.unwrap();
+            Ok(HttpResponse::NoContent().json({}))
+        },
+        "trash" => {
+            let result = company::trash_company(&key, &pool).await.unwrap();
+            Ok(HttpResponse::Ok().json(result))
+        },
+        "restore" => {
+            let result = company::restore_company(&key, &pool).await.unwrap();
+            Ok(HttpResponse::Ok().json(result))
+        },
+        &_ => {
+            Ok(HttpResponse::NoContent().json({}))
+        },
     }
 }
 

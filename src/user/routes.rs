@@ -24,7 +24,7 @@ async fn find(
     let params: FindUsersParams = payload.into_inner();
     match params.validate() {
         Ok(_) => {
-            let result = web::block(move || find_users(params, &pool)).await?;
+            let result = find_users(params, &pool).await.unwrap();
             Ok(HttpResponse::Ok().json(result))
         },
         Err(e) => {
@@ -35,10 +35,10 @@ async fn find(
 
 #[get("/users/{key}")]
 async fn show(
-    web::Path(key): web::Path<String>,
+    key: web::Path<String>,
     pool: web::Data<DbPool>,
 ) -> Result<HttpResponse, Error> {
-    let result = web::block(move || show_user(&key, &pool)).await?;
+    let result = show_user(&key, &pool).await.unwrap();
     Ok(HttpResponse::Ok().json(result))
 }
 
@@ -65,7 +65,7 @@ async fn create(
 
 #[put("/users/{key}")]
 async fn update(
-    web::Path(key): web::Path<String>,
+    key: web::Path<String>,
     payload: Multipart,
     pool: web::Data<DbPool>,
 ) -> Result<HttpResponse, Error> {
@@ -82,21 +82,26 @@ async fn update(
 
 #[delete("/users/{key}")]
 async fn delete(
-    web::Path(key): web::Path<String>,
+    key: web::Path<String>,
     form: web::Form<DeleteUserParams>,
     pool: web::Data<DbPool>,
 ) -> Result<HttpResponse, Error> {
-    let mode = form.mode.clone();
-    let result = web::block(move || {
-        match form.mode.as_str() {
-            "trash" => trash_user(&key, &pool),
-            "restore" => restore_user(&key, &pool),
-            "erase" | _ => erase_user(&key, &pool),
-        }
-    }).await?;
-    match mode.as_str() {
-        "trash" | "restore" => Ok(HttpResponse::Ok().json(result)),
-        "erase" | _ => Ok(HttpResponse::NoContent().json({})),
+    match form.mode.as_str() {
+        "erase" => {
+            let result = erase_user(&key, &pool).await.unwrap();
+            Ok(HttpResponse::NoContent().json({}))
+        },
+        "trash" => {
+            let result = trash_user(&key, &pool).await.unwrap();
+            Ok(HttpResponse::Ok().json(result))
+        },
+        "restore" => {
+            let result = restore_user(&key, &pool).await.unwrap();
+            Ok(HttpResponse::Ok().json(result))
+        },
+        &_ => {
+            Ok(HttpResponse::NoContent().json({}))
+        },
     }
 }
 

@@ -7,23 +7,23 @@ authors = ["bitfriend <bitfriend@hotmail.com>"]
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-actix-multipart = "0.3"
+actix-multipart = "0.4.0-beta.6"
 actix-ratelimit = "0.3"
-actix-web = "3.3"
-anyhow = "1.0"
-arangors = { version = "0.5", default-features = false }
+actix-web = "4.0.0-beta.9"
+arangors = { path = "./libs/arangors", version = "0.4.8", default-features = false }
 bcrypt = "0.10"
 chrono = { version = "0.4", features = ["serde"] }
 diesel = { version = "1.4", features = ["uuidv07", "r2d2", "chrono"] }
 dotenv = "0.15"
 futures = "0.3"
 mime = "0.3"
-r2d2 = "0.8"
-r2d2_arangors = "0.2"
+mobc = "0.7"
+mobc-arangors = { path = "./libs/mobc-arangors", version = "0.2.2", default-features = false, features = ["reqwest"] }
 sanitize-filename = "0.3"
 serde = "1.0"
 serde_derive = "1.0"
 serde_json = "1.0"
+tokio = { version = "1", features = ["fs", "macros", "rt-multi-thread"] }
 uclient = "0.1"
 uuid = { version = "0.8", features = ["serde", "v4"] }
 validator = { version = "0.14", features = ["derive"] }

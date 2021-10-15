@@ -5,6 +5,7 @@ use actix_web::{
     Error,
 };
 use arangors::{
+    connection::ReqwestClient,
     document::{
         options::{InsertOptions, RemoveOptions, UpdateOptions},
         response::DocumentResponse,
@@ -23,11 +24,10 @@ use std::{
     str,
     vec::Vec,
 };
-use uclient::reqwest::ReqwestClient;
 use validator::{Validate, ValidationErrors};
 
 use crate::config::db_database;
-use crate::database::{DbConn, DbPool};
+use crate::database::DbPool;
 use crate::user::{
     CreateUserRequest,
     FindUsersParams,
@@ -61,12 +61,10 @@ async fn accept_uploading(
                 let mut filepath = env::current_dir()?;
                 filepath.push("storage");
                 filepath.push(&uniqname);
-                let mut f = web::block(|| File::create(filepath)).await?;
                 // field data may be larger than 64KB or it may be on page boundary
                 while let Ok(Some(chunk)) = field.try_next().await {
-                    f = web::block(move || f.write_all(&chunk).map(|_| f)).await?;
+                    tokio::fs::write(&filepath, chunk).await.unwrap();
                 }
-                web::block(move || f.flush()).await?;
                 let pathtext = format!("/storage/{}", uniqname);
                 vars.insert(String::from(name), pathtext);
             },
@@ -77,12 +75,13 @@ async fn accept_uploading(
     Ok(vars)
 }
 
-pub fn find_users(
+pub async fn find_users(
     params: FindUsersParams,
     pool: &DbPool,
 ) -> Result<Vec<UserResponse>, ValidationErrors> {
-    let conn: DbConn = pool.get().unwrap();
-    let db: Database<ReqwestClient> = conn.db(&db_database()).unwrap();
+    let client = pool.get().await.unwrap();
+    let db = client.db(&db_database()).await.unwrap();
+
     let mut terms = vec!["FOR x IN users"];
     let mut vars: HashMap<&str, Value> = HashMap::new();
     if params.search.is_some() {
@@ -102,24 +101,27 @@ pub fn find_users(
         terms.push("LIMIT 0, @@limit");
         vars.insert("@limit", to_value(limit).unwrap());
     }
+
     terms.push("RETURN UNSET(x, 'password')");
     let q = terms.join(" ");
+
     let aql = AqlQuery::builder()
         .query(&q)
         .bind_vars(vars)
         .build();
-    let records: Vec<UserResponse> = db.aql_query(aql).expect("Query failed");
+    let records: Vec<UserResponse> = db.aql_query(aql).await.unwrap();
     Ok(records)
 }
 
-pub fn show_user(
+pub async fn show_user(
     key: &String,
     pool: &DbPool,
 ) -> Result<UserResponse, &'static str> {
-    let conn: DbConn = pool.get().unwrap();
-    let db: Database<ReqwestClient> = conn.db(&db_database()).unwrap();
-    let collection: Collection<ReqwestClient> = db.collection("users").unwrap();
-    let res: Document<UserResponse> = collection.document(key.as_ref()).unwrap();
+    let client = pool.get().await.unwrap();
+    let db = client.db(&db_database()).await.unwrap();
+
+    let collection: Collection<ReqwestClient> = db.collection("users").await.unwrap();
+    let res: Document<UserResponse> = collection.document(key.as_ref()).await.unwrap();
     let record: UserResponse = res.document;
     Ok(record)
 }
@@ -128,9 +130,10 @@ pub async fn create_user(
     payload: Multipart,
     pool: &DbPool,
 ) -> Result<UserResponse, Error> {
-    let conn: DbConn = pool.get().unwrap();
-    let db: Database<ReqwestClient> = conn.db(&db_database()).unwrap();
-    let collection: Collection<ReqwestClient> = db.collection("users").unwrap();
+    let client = pool.get().await.unwrap();
+    let db = client.db(&db_database()).await.unwrap();
+
+    let collection: Collection<ReqwestClient> = db.collection("users").await.unwrap();
     let now = Utc::now();
 
     let vars: HashMap<String, String> = accept_uploading(payload).await?;
@@ -172,7 +175,7 @@ pub async fn create_user(
             let options: InsertOptions = InsertOptions::builder()
                 .return_new(true)
                 .build();
-            let res: DocumentResponse<Document<CreateUserRequest>> = collection.create_document(Document::new(req), options).unwrap();
+            let res: DocumentResponse<Document<CreateUserRequest>> = collection.create_document(Document::new(req), options).await.unwrap();
             let doc: &CreateUserRequest = res.new_doc().unwrap();
             let record: CreateUserRequest = doc.clone();
             let header = res.header().unwrap();
@@ -201,9 +204,10 @@ pub async fn update_user(
     payload: Multipart,
     pool: &DbPool,
 ) -> Result<UserResponse, Error> {
-    let conn: DbConn = pool.get().unwrap();
-    let db: Database<ReqwestClient> = conn.db(&db_database()).unwrap();
-    let collection: Collection<ReqwestClient> = db.collection("users").unwrap();
+    let client = pool.get().await.unwrap();
+    let db = client.db(&db_database()).await.unwrap();
+
+    let collection: Collection<ReqwestClient> = db.collection("users").await.unwrap();
     let now = Utc::now();
 
     let vars: HashMap<String, String> = accept_uploading(payload).await?;
@@ -250,10 +254,11 @@ pub async fn update_user(
         .return_new(true)
         .return_old(true)
         .build();
-    let res: DocumentResponse<Document<UpdateUserRequest>> = collection.update_document(key, Document::new(req), options).unwrap();
+    let res: DocumentResponse<Document<UpdateUserRequest>> = collection.update_document(key, Document::new(req), options).await.unwrap();
     let doc: &UpdateUserRequest = res.new_doc().unwrap();
     let record: UpdateUserRequest = doc.clone();
     let header = res.header().unwrap();
+
     Ok(UserResponse {
         _id: header._id.clone(),
         _key: header._key.clone(),
@@ -267,20 +272,23 @@ pub async fn update_user(
     })
 }
 
-pub fn erase_user(
+pub async fn erase_user(
     key: &String,
     pool: &DbPool,
 ) -> Result<UserResponse, &'static str> {
-    let conn: DbConn = pool.get().unwrap();
-    let db: Database<ReqwestClient> = conn.db(&db_database()).unwrap();
-    let collection: Collection<ReqwestClient> = db.collection("users").unwrap();
+    let client = pool.get().await.unwrap();
+    let db = client.db(&db_database()).await.unwrap();
+
+    let collection: Collection<ReqwestClient> = db.collection("users").await.unwrap();
     let options: RemoveOptions = RemoveOptions::builder()
         .return_old(true)
         .build();
-    let res: DocumentResponse<Document<UpdateUserRequest>> = collection.remove_document(key.as_ref(), options, None).unwrap();
+
+    let res: DocumentResponse<Document<UpdateUserRequest>> = collection.remove_document(key.as_ref(), options, None).await.unwrap();
     let doc: &UpdateUserRequest = res.old_doc().unwrap();
     let record: UpdateUserRequest = doc.clone();
     let header = res.header().unwrap();
+
     Ok(UserResponse {
         _id: header._id.clone(),
         _key: header._key.clone(),
@@ -294,13 +302,14 @@ pub fn erase_user(
     })
 }
 
-pub fn trash_user(
+pub async fn trash_user(
     key: &String,
     pool: &DbPool,
 ) -> Result<UserResponse, &'static str> {
-    let conn: DbConn = pool.get().unwrap();
-    let db: Database<ReqwestClient> = conn.db(&db_database()).unwrap();
-    let collection: Collection<ReqwestClient> = db.collection("users").unwrap();
+    let client = pool.get().await.unwrap();
+    let db = client.db(&db_database()).await.unwrap();
+
+    let collection: Collection<ReqwestClient> = db.collection("users").await.unwrap();
     let obj = json!({
         "deleted_at": Utc::now(),
     });
@@ -310,10 +319,12 @@ pub fn trash_user(
         .return_new(true)
         .return_old(true)
         .build();
-    let res: DocumentResponse<Document<UpdateUserRequest>> = collection.update_document(key, Document::new(data), options).unwrap();
+
+    let res: DocumentResponse<Document<UpdateUserRequest>> = collection.update_document(key, Document::new(data), options).await.unwrap();
     let doc: &UpdateUserRequest = res.new_doc().unwrap();
     let record: UpdateUserRequest = doc.clone();
     let header = res.header().unwrap();
+
     Ok(UserResponse {
         _id: header._id.clone(),
         _key: header._key.clone(),
@@ -327,23 +338,26 @@ pub fn trash_user(
     })
 }
 
-pub fn restore_user(
+pub async fn restore_user(
     key: &String,
     pool: &DbPool,
 ) -> Result<UserResponse, &'static str> {
-    let conn: DbConn = pool.get().unwrap();
-    let db: Database<ReqwestClient> = conn.db(&db_database()).unwrap();
-    let collection: Collection<ReqwestClient> = db.collection("users").unwrap();
+    let client = pool.get().await.unwrap();
+    let db = client.db(&db_database()).await.unwrap();
+
+    let collection: Collection<ReqwestClient> = db.collection("users").await.unwrap();
     let data: UpdateUserRequest = from_str::<UpdateUserRequest>("{\"deleted_at\":null}").unwrap();
     let options: UpdateOptions = UpdateOptions::builder()
         .return_new(true)
         .return_old(true)
         .keep_null(false)
         .build();
-    let res: DocumentResponse<Document<UpdateUserRequest>> = collection.update_document(key, Document::new(data), options).unwrap();
+
+    let res: DocumentResponse<Document<UpdateUserRequest>> = collection.update_document(key, Document::new(data), options).await.unwrap();
     let doc: &UpdateUserRequest = res.new_doc().unwrap();
     let record: UpdateUserRequest = doc.clone();
     let header = res.header().unwrap();
+
     Ok(UserResponse {
         _id: header._id.clone(),
         _key: header._key.clone(),
