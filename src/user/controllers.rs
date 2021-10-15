@@ -10,7 +10,7 @@ use arangors::{
         options::{InsertOptions, RemoveOptions, UpdateOptions},
         response::DocumentResponse,
     },
-    AqlQuery, Collection, Database, Document,
+    AqlQuery, Collection, Document,
 };
 use bcrypt::{DEFAULT_COST, hash, verify};
 use chrono::prelude::*;
@@ -19,11 +19,12 @@ use serde_json::{from_str, json, to_string, to_value, Value};
 use std::{
     collections::HashMap,
     env,
-    fs::File,
-    io::Write,
+    ffi::OsStr,
+    path::Path,
     str,
     vec::Vec,
 };
+use uuid::Uuid;
 use validator::{Validate, ValidationErrors};
 
 use crate::config::db_database;
@@ -57,7 +58,8 @@ async fn accept_uploading(
             },
             (mime::IMAGE, _) => {
                 let filename = content_disposition.get_filename().unwrap();
-                let uniqname = sanitize_filename::sanitize(filename);
+                let file_extension = Path::new(filename).extension().and_then(OsStr::to_str).unwrap().to_string();
+                let uniqname = format!("{}.{}", Uuid::new_v4().to_string(), file_extension);
                 let mut filepath = env::current_dir()?;
                 filepath.push("storage");
                 filepath.push(&uniqname);
